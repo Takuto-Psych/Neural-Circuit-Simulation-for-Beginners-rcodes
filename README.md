@@ -1,1 +1,7 @@
-# Neural-Circuit-Simulation-for-Beginners-rcodes
+## これは何
+はじめての神経回路シミュレーションを読み、
+コードの実装の理解深めるためにRに翻訳したもの。
+
+
+## 限界
+C のfor文をRでのベクトル処理に直すことができなくなれば詰み。
