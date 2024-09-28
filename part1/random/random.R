@@ -1,5 +1,6 @@
 rm(list = ls())
 library(tidyverse)
+library(randtoolbox)
 set.seed(2525)
 
 VALUES <- data.frame(
@@ -18,7 +19,7 @@ VALUES <- data.frame(
   ,v_reset = - 60.0 ##リセット電位
   ,theta = -50.0　##閾値
   
-  ,p = 0.3 ##シナプス結合の形成確立
+  ,p = 0.02 ##シナプス結合の形成確率
   
   ,d = 10 ###集団を出すための時間幅の設定
 )
@@ -39,9 +40,11 @@ initialize <- function() { ##ネットワークの構造体の初期化を行う
     v = VALUES$v_init + runif(VALUES$n, 0, 10)      # 膜電位
     ,ge = rep(0, VALUES$n)                    # 興奮性シナプス入力
     ,gi = rep(0, VALUES$n)                    # 抑制性シナプス入力
-    ,w = matrix( #シナプス重み行列。結合があれば1、なければ0
-      runif(VALUES$n) < VALUES$p, nrow = VALUES$n, ncol = VALUES$n
-    ) 
+    ,w = matrix(
+      runif(n = VALUES$n * VALUES$n, min = 0, max = 1) < VALUES$p
+      ,ncol = VALUES$n
+      ,nrow = VALUES$n
+    )
     ,s = rep(FALSE, VALUES$n)                  # スパイク状態
   )
 }
@@ -65,6 +68,10 @@ caluculate_synaptic_input <- function(network) {
   ##膜電位の更新
   network$ge <- exp(- VALUES$dt / VALUES$tau_e) * network$ge + re
   network$gi <- exp(- VALUES$dt / VALUES$tau_i) * network$gi + ri
+  
+  ##総和もとっておく
+  network$re <- re
+  network$ri <- ri
   
   return(network)
 }
@@ -126,6 +133,8 @@ for(nt in 1:VALUES$nt) {
   network <- caluculate_synaptic_input(network) ##シナプス入力の作成
   network <- update_cell_parameters(network) ##膜電位の更新
   DF <- output_spike(nt, network, DF)
+  print(nt)
+  
 }
 
 
