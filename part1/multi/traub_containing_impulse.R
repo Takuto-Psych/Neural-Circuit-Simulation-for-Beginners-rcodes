@@ -1,4 +1,10 @@
 rm(list = ls())
+# i_injの8番目の要素に値を設定
+# EXE_VALUES$I_Inj[9] <- 1e-4 / COMPARTMENT_VALUES$area[9]
+# 条件に基づいて注入電流を設定
+# EXE_VALUES$I_Inj[9] <- if (t >= 1000 && t < 1001) { 1e-2 / COMPARTMENT_VALUES$area[9] } else { 0 }
+# の処理の前者
+
 
 library(tidyverse)
 
@@ -32,7 +38,7 @@ GATE_VALUES <- data.frame(
 )
 
 names(GATE_VALUES) <- c(
- 
+  
   "M" ## ナトリウムチャネルの活性化ゲート。
   ,"S" ## カルシウムチャネルの活性化ゲート。
   ,"N" ## 遅延整流カリウムチャネルの活性化ゲート。
@@ -93,8 +99,8 @@ FUNCTIONS_BASE <- list(
       ) /
         18.975
       ,2 * exp(-((v - VALUES$V_LEAK) - 6.5) / 27.0)
-  )
-  return(result)
+    )
+    return(result)
   }
   ,alpha_a = function(v) {
     0.02 * (13.1 - (v - VALUES$V_LEAK)) /
@@ -113,7 +119,6 @@ FUNCTIONS_BASE <- list(
       0.005,
       exp(-(v - VALUES$V_LEAK) / 20.0) / 200.0
     )
-    
     return(result)
   }
   ,alpha_b = function(v) {
@@ -239,155 +244,148 @@ FUNCTIONS_TAU_INF <- list(
 
 
 
-##プログラムの実行に関数群。配列処理できるようにして軽めに作ることを意識。
-FUNCTIONS_EXE <- list(
-  initialize = function() {
-    ##外部電流の初期値
-    I_inj <- rep(0, VALUES$NC)
-    
-    ##各コンポートメント（19個）のゲート変数（12(実際は11)）VARSの初期化
-    VARS <- data.frame(
-      matrix(0, nrow = VALUES$NC, ncol = GATE_VALUES$N_VARS)
-    )
-    names(VARS) <- names(GATE_VALUES)
-    
-    VARS$V <- VALUES$V_LEAK
-    
-    VARS$M <- FUNCTIONS_TAU_INF$inf_m(VARS$V)
-    VARS$S <- FUNCTIONS_TAU_INF$inf_a(VARS$V)
-    VARS$N <- FUNCTIONS_TAU_INF$inf_n(VARS$V)
-    VARS$C <- FUNCTIONS_TAU_INF$inf_c(VARS$V)
-    VARS$A <- FUNCTIONS_TAU_INF$inf_a(VARS$V)
-    VARS$H <- FUNCTIONS_TAU_INF$inf_h(VARS$V)
-    VARS$R <- FUNCTIONS_TAU_INF$inf_r(VARS$V)
-    VARS$B <- FUNCTIONS_TAU_INF$inf_b(VARS$V)
-    
-    
-    i_Ca <- COMPARTMENT_VALUES$g_Ca *
-      COMPARTMENT_VALUES$area * VARS$S * VARS$R *
-      (VARS$V - VALUES$V_Ca)
-    
-    VARS$XI <- - i_Ca * COMPARTMENT_VALUES$phi / VALUES$Beta
-    VARS$Q <- FUNCTIONS_TAU_INF$inf_q(VARS$XI)
-    
-    
-  
-    G_COMP <- matrix(0, nrow = VALUES$NC, ncol = 2)  # G_COMPの初期化
-    
-    # iが1のときは0、そうでなければ計算を行う
-    G_COMP[1, 1] <- 0
-    G_COMP[2:VALUES$NC, 1] <- sapply(2:VALUES$NC, function(i) {
-      2.0 / (
-        (VALUES$Ri * COMPARTMENT_VALUES$len[i - 1]) / (pi * COMPARTMENT_VALUES$rad[i - 1]^2) + 
-          (VALUES$Ri * COMPARTMENT_VALUES$len[i]) / (pi * COMPARTMENT_VALUES$rad[i]^2)
-      )
-    })
-    
-    # iがNCのときは0、そうでなければ計算を行う
-    G_COMP[VALUES$NC, 2] <- 0
-    G_COMP[1:(VALUES$NC - 1), 2] <- sapply(1:(VALUES$NC - 1), function(i) {
-      2.0 / (
-        (VALUES$Ri * COMPARTMENT_VALUES$len[i]) / (pi * COMPARTMENT_VALUES$rad[i]^2) + 
-          (VALUES$Ri * COMPARTMENT_VALUES$len[i + 1]) / (pi * COMPARTMENT_VALUES$rad[i + 1]^2)
-      )
-    })
-    
-    int_list <- list(
-      VARS
-      ,I_inj
-      ,G_COMP  
-    )
-    
-    names(int_list) <- c("VARS", "I_Inj", "G_COMP")
-    
-    return(int_list)
-  }
-  
-  ,solve_euler = function(vars, i_inj, g_comp){
-    vars = EXE_VALUES$VARS
-    i_inj = EXE_VALUES$I_inj
-    g_comp = EXE_VALUES$G_COMP
+###初期値の設定をします。関数に入れてもいいけど、デバッグ大変なので
 
-    DVARS <- data.frame(
-      matrix(0, nrow = VALUES$NC, ncol = GATE_VALUES$N_VARS)
-    )
-    names(DVARS) <- names(GATE_VALUES)
-    
-    i_ion <- rep(0, VALUES$NC)
-    i_comp <- rep(0, VALUES$NC)
-    
-    ##各コンポートメント（19個）のゲート変数（12(実際は11)）VARSの更新
-    v <- vars$V
-    
-    DVARS$M <- (VALUES$DT / FUNCTIONS_TAU_INF$tau_m(DVARS$V)) * 
-      (- vars$V + FUNCTIONS_TAU_INF$inf_m(v))
-    DVARS$S <- (VALUES$DT / FUNCTIONS_TAU_INF$tau_s(DVARS$V)) * 
-      (- vars$V + FUNCTIONS_TAU_INF$inf_s(DVARS$V))
-    DVARS$N <- (VALUES$DT / FUNCTIONS_TAU_INF$tau_n(DVARS$V)) * 
-      (- vars$V + FUNCTIONS_TAU_INF$inf_n(DVARS$V))
-    DVARS$C <- (VALUES$DT / FUNCTIONS_TAU_INF$tau_c(DVARS$V)) * 
-      (- vars$V + FUNCTIONS_TAU_INF$inf_c(DVARS$V))
-    DVARS$A <- (VALUES$DT / FUNCTIONS_TAU_INF$tau_a(DVARS$V)) * 
-      (- vars$V + FUNCTIONS_TAU_INF$inf_a(DVARS$V))
-    DVARS$H <- (VALUES$DT / FUNCTIONS_TAU_INF$tau_h(DVARS$V)) * 
-      (- vars$V + FUNCTIONS_TAU_INF$inf_h(DVARS$V))
-    DVARS$R <- (VALUES$DT / FUNCTIONS_TAU_INF$tau_r(DVARS$V)) * 
-      (- vars$V + FUNCTIONS_TAU_INF$inf_r(DVARS$V))
-    DVARS$B <- (VALUES$DT / FUNCTIONS_TAU_INF$tau_b(DVARS$V)) * 
-      (- vars$V + FUNCTIONS_TAU_INF$inf_b(DVARS$V))
-    
-    DVARS$Q <- (VALUES$DT / FUNCTIONS_TAU_INF$tau_q(vars$XI)) *
-      (- vars$V + FUNCTIONS_TAU_INF$inf_q(vars$XI))
-    
-    
-    ##イオンの更新
-    i_ion <- 
-      (COMPARTMENT_VALUES$g_leak + DVARS$V - VALUES$V_LEAK) +
-      COMPARTMENT_VALUES$g_Na * vars$M * vars$M * vars$H *(DVARS$V - VALUES$V_Na) +
-      COMPARTMENT_VALUES$g_Ca * vars$S * vars$S * vars$R * (DVARS$V - VALUES$V_Ca) +
-      COMPARTMENT_VALUES$g_K_DR * vars$N * (DVARS$V - VALUES$V_K) + 
-      COMPARTMENT_VALUES$g_K_A * vars$A * vars$B *(DVARS$V - VALUES$V_K) + 
-      COMPARTMENT_VALUES$g_K_AHP * vars$Q * (DVARS$V - VALUES$V_K) + 
-      COMPARTMENT_VALUES$g_K_A * vars$C * pmin(vars$XI / 250) * (DVARS$V - VALUES$V_K)
-    
-    
-    # 条件に応じて計算
-    i_comp[1] <- 0  # iが1のときは0
-    
-    # 2からNC-1までの計算
-    i_comp[2:(VALUES$NC - 1)] <- 
-      g_comp[2:(VALUES$NC - 1), 1] * (DVARS$V[1:(VALUES$NC - 2)] - DVARS$V[2:(VALUES$NC - 1)]) / COMPARTMENT_VALUES$area[2:(VALUES$NC - 1)] +
-      g_comp[2:(VALUES$NC - 1), 2] * (DVARS$V[3:VALUES$NC] - DVARS$V[2:(VALUES$NC - 1)]) / COMPARTMENT_VALUES$area[2:(VALUES$NC - 1)]
-    
-    # NCのときは0
-    i_comp[VALUES$NC] <- 0
-    
-    DVARS$V <- (VALUES$DT / VALUES$Cm) * (- i_ion + i_comp + i_inj) 
-    
-    i_Ca <- COMPARTMENT_VALUES$g_Ca * COMPARTMENT_VALUES$area * vars$S * vars$R * (vars$V - VALUES$V_Ca)
-    
-    DVARS$XI <- DVARS$XI + 
-      VALUES$DT * (COMPARTMENT_VALUES$phi * i_Ca - VALUES$Beta * vars$XI)
-    
-    vars <- vars + DVARS
-    
-    list_result <- list(
-      vars
-      ,i_inj
-      ,g_comp
-    )
-    names(list_result) <- c("VARS", "I_Inj", "G_COMP")
-    return(list_result)
-  }
+EXE_VALUES <- list(
+  Vars = data.frame(
+    matrix(0, nrow = VALUES$NC, ncol = GATE_VALUES$N_VARS)
+  )
+  ,I_Inj = rep(0, VALUES$NC)
+  ,G_Comp = matrix(0, nrow = VALUES$NC, ncol = 2)  # G_COMPの初期化
+  ,I_Comp = rep(0, VALUES$NC)
 )
 
 
+names(EXE_VALUES$Vars) <- names(GATE_VALUES)
+
+EXE_VALUES$Vars$V <- VALUES$V_LEAK
+
+EXE_VALUES$Vars$M <- FUNCTIONS_TAU_INF$inf_m(EXE_VALUES$Vars$V)
+EXE_VALUES$Vars$S <- FUNCTIONS_TAU_INF$inf_s(EXE_VALUES$Vars$V)
+EXE_VALUES$Vars$N <- FUNCTIONS_TAU_INF$inf_n(EXE_VALUES$Vars$V)
+EXE_VALUES$Vars$C <- FUNCTIONS_TAU_INF$inf_c(EXE_VALUES$Vars$V)
+EXE_VALUES$Vars$A <- FUNCTIONS_TAU_INF$inf_a(EXE_VALUES$Vars$V)
+EXE_VALUES$Vars$H <- FUNCTIONS_TAU_INF$inf_h(EXE_VALUES$Vars$V)
+EXE_VALUES$Vars$R <- FUNCTIONS_TAU_INF$inf_r(EXE_VALUES$Vars$V)
+EXE_VALUES$Vars$B <- FUNCTIONS_TAU_INF$inf_b(EXE_VALUES$Vars$V)
+
+i_Ca <- COMPARTMENT_VALUES$g_Ca * COMPARTMENT_VALUES$area *
+  EXE_VALUES$Vars$S * EXE_VALUES$Vars$S * EXE_VALUES$Vars$R  *
+  (EXE_VALUES$Vars$V - VALUES$V_Ca)
+
+EXE_VALUES$Vars$XI <- - i_Ca * COMPARTMENT_VALUES$phi / VALUES$Beta
+EXE_VALUES$Vars$Q <- FUNCTIONS_TAU_INF$inf_q(EXE_VALUES$Vars$XI)
 
 
-EXE_VALUES <- FUNCTIONS_EXE$initialize()
 
-EXE_VALUES <- FUNCTIONS_EXE$solve_euler(EXE_VALUES$VARS, EXE_VALUES$I_Inj, EXE_VALUES$G_COMP)
-EXE_VALUES
+for (i in 1:VALUES$NC) {
+  EXE_VALUES$G_Comp[i, 1] <- if (i == 1) {
+    0
+  } else {
+    2.0 / (
+      (VALUES$Ri * COMPARTMENT_VALUES$len[i - 1]) / 
+        FUNCTIONS_BASE$pi_r_2(COMPARTMENT_VALUES$rad[i - 1]) +
+        (VALUES$Ri * COMPARTMENT_VALUES$len[i]) / 
+        FUNCTIONS_BASE$pi_r_2(COMPARTMENT_VALUES$rad[i])
+    )
+  }
+  EXE_VALUES$G_Comp[i, 2] <- if (i == VALUES$NC) {
+    0
+  } else {
+    2.0 / (
+      (VALUES$Ri * COMPARTMENT_VALUES$len[i]) / 
+        FUNCTIONS_BASE$pi_r_2(COMPARTMENT_VALUES$rad[i]) +
+        (VALUES$Ri * COMPARTMENT_VALUES$len[i + 1]) / 
+        FUNCTIONS_BASE$pi_r_2(COMPARTMENT_VALUES$rad[i + 1])
+    )
+  }
+}
+
+
+###オイラー法で実行していく処理を関数にします。
+####デルタのデータたちをリストでまとめます
+
+
+solve_euler <- function(vars, i_inj, g_comp) {
+  ##関数内部でのデバック用
+  # vars = EXE_VALUES$Vars
+  # i_inj = EXE_VALUES$I_Inj
+  # g_comp = EXE_VALUES$G_Comp
+  
+  DELTA_VALUES <- list(
+    Delta_Vars = data.frame(
+      matrix(0, nrow = VALUES$NC, ncol = GATE_VALUES$N_VARS)
+    )
+    ,i_ion = rep(0, VALUES$NC)
+    ,i_comp = rep(0, VALUES$NC)
+  )
+  
+  names(DELTA_VALUES$Delta_Vars) <- names(GATE_VALUES)
+  
+  v <- vars$V
+  
+  ##各コンダクタンスを設定
+  for (var_name in c("M", "S", "N", "C", "A", "H", "R", "B")) {
+    DELTA_VALUES$Delta_Vars[[var_name]] <- (VALUES$DT / FUNCTIONS_TAU_INF[[paste0("tau_", tolower(var_name))]](v)) *
+      (-vars[[var_name]] + FUNCTIONS_TAU_INF[[paste0("inf_", tolower(var_name))]](v))
+  }
+  
+  DELTA_VALUES$Delta_Vars$Q <- (VALUES$DT / FUNCTIONS_TAU_INF$tau_q(vars$XI)) *
+    (-vars$Q + FUNCTIONS_TAU_INF$inf_q(vars$XI))
+  
+  
+  DELTA_VALUES$i_ion <-
+    COMPARTMENT_VALUES$g_leak * (v - VALUES$V_LEAK) +
+    COMPARTMENT_VALUES$g_Na * vars$M * vars$M * vars$H * (v - VALUES$V_Na) +
+    COMPARTMENT_VALUES$g_Ca * vars$S * vars$S * vars$R * (v - VALUES$V_Ca) +
+    COMPARTMENT_VALUES$g_K_DR * vars$N * (v - VALUES$V_K) +
+    COMPARTMENT_VALUES$g_K_A * vars$A * vars$B * (v - VALUES$V_K) + 
+    COMPARTMENT_VALUES$g_K_AHP * vars$Q * (v - VALUES$V_K) +
+    COMPARTMENT_VALUES$g_K_C * vars$C * pmin(1, vars$XI / 250.0) * (v - VALUES$V_K)
+  
+  
+  # i_compの計算
+  i_comp1 <- rep(0, VALUES$NC)
+  i_comp2 <- rep(0, VALUES$NC)
+  # # 最初の要素の処理
+  for(i in 1:VALUES$NC){
+    i_comp1[i] <- ifelse(
+      i == 1
+      ,0
+      ,(g_comp[i, 1] * (v[i - 1] - v[i]) / COMPARTMENT_VALUES$area[i])
+    )
+    i_comp2[i] <-ifelse(
+      i == VALUES$NC
+      ,0
+      , (g_comp[i, 2] * (v[i + 1] - v[i]) / COMPARTMENT_VALUES$area[i])
+    )
+    DELTA_VALUES$i_comp[i] <- i_comp1[i] + i_comp2[i]
+  }
+  
+  
+  
+  DELTA_VALUES$Delta_Vars$V <- (VALUES$DT / VALUES$Cm) * (- DELTA_VALUES$i_ion + DELTA_VALUES$i_comp + i_inj)
+  
+  i_Ca <-
+    COMPARTMENT_VALUES$g_Ca * COMPARTMENT_VALUES$area * vars$S *　vars$S * vars$R *
+    (vars$V - VALUES$V_Ca)
+  
+  DELTA_VALUES$Delta_Vars$XI <-
+    VALUES$DT * (- COMPARTMENT_VALUES$phi * i_Ca - VALUES$Beta * vars$XI)
+  
+  vars <- vars + DELTA_VALUES$Delta_Vars
+  
+  
+  result_list <- list(
+    Vars = vars
+    ,I_Inj = i_inj
+    ,G_Comp = g_comp
+    ,I_Comp = DELTA_VALUES$i_comp
+    ,I_Ion = DELTA_VALUES$i_ion
+  )
+  
+  return(result_list)
+}
 
 
 DF <- data.frame(
@@ -396,30 +394,58 @@ DF <- data.frame(
 )
 colnames(DF)[2:(VALUES$NC + 1)] <- paste0("V_", 1:VALUES$NC)
 
+##表に出てこない変数の確認用に書いていたコード
+# VAR_DF <- data.frame(
+#   time = numeric(VALUES$NT)
+#   ,matrix(0, nrow = VALUES$NT, ncol = VALUES$NC)
+# )
+# colnames(VAR_DF)[2:(VALUES$NC + 1)] <- paste0("V_", 1:VALUES$NC)
 
-EXE_VALUES <- FUNCTIONS_EXE$solve_euler(vars = EXE_VALUES$VARS, i_inj = EXE_VALUES$I_inj, g_comp = EXE_VALUES$G_COMP)
+RESULT_LIST <- list()
 
 for(nt in 1:VALUES$NT){
   t = VALUES$DT * (nt - 1)
   
-  DF[nt, 1] <- t
-  DF[nt, 2:(VALUES$NC + 1)] <- EXE_VALUES$VARS$V
+  RESULT_LIST[[nt]] <- c(t, EXE_VALUES$Vars$V)
   
-  # i_injの8番目の要素に値を設定
-  EXE_VALUES$I_inj[8] <- 1e-4 / COMPARTMENT_VALUES$area[8]
-  # 条件に基づいて注入電流を設定
-  # EXE_VALUES$I_inj[8] <- if (t >= 1000 && t < 1001) { 1e-2 / COMPARTMENT_VALUES$area[8] } else { 0 }
+  ##表に出てこない変数の確認用に書いていたコード
+  # VAR_DF[nt, 1] <- t
+  # VAR_DF[nt, 2:(VALUES$NC + 1)] <- EXE_VALUES$I_Comp
   
-  EXE_VALUES <- FUNCTIONS_EXE$solve_euler(vars = EXE_VALUES$VARS, i_inj = EXE_VALUES$I_Inj, g_comp = EXE_VALUES$G_COMP)
+  EXE_VALUES$I_Inj[9] <- 1e-4 / COMPARTMENT_VALUES$area[9]
   
+  EXE_VALUES <- solve_euler(vars = EXE_VALUES$Vars, i_inj = EXE_VALUES$I_Inj, g_comp = EXE_VALUES$G_Comp)
   print(nt)
 }
 
+DF <- do.call(rbind, RESULT_LIST)
+DF <- data.frame(DF)
+names(DF) <- c("time", paste0("V_", rep(1:VALUES$NC)))
 
 
+DF_LONG <- DF %>% pivot_longer(
+  cols = starts_with("V_")
+  ,names_to = "compartment"
+  ,values_to = "V"
+) %>% mutate(
+  .
+  ,compartment = gsub("V_", "", compartment)
+) %>% mutate(
+  .
+  ,compartment = factor(
+    compartment
+    ,levels = sort(unique(as.numeric(compartment)))
+  )
+)
 
 
-
+DF_LONG %>% filter(
+  .
+  ,as.numeric(compartment) >= 9
+) %>% ggplot(
+  .
+  ,aes(x = time, y = V, colour = compartment)
+) + geom_line() 
 
 
 
